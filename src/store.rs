@@ -1,6 +1,7 @@
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-#[derive(Default, Debug)]
+#[derive(Default, Deserialize, Debug, Serialize)]
 pub struct Store {
     store: HashMap<String, String>,
 }

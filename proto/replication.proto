@@ -1,0 +1,27 @@
+syntax = "proto3";
+package replication;
+
+import "google/protobuf/timestamp.proto";
+
+service ReplicaService {
+  rpc SetReplica (SetReplicaRequest) returns (SetReplicaResponse);
+  // rpc DeleteReplica (DeleteReplicaRequest) returns (DeleteReplicaResponse);
+}
+
+message SetReplicaRequest {
+  string key = 1;
+  string value = 2;
+  google.protobuf.Timestamp timestamp = 3;
+}
+
+message SetReplicaResponse {}
+
+service LeaderService {
+  rpc GetLatestSnapshot (GetLatestSnapshotRequest) returns (GetLatestSnapshotResponse);
+}
+
+message GetLatestSnapshotRequest {}
+
+message GetLatestSnapshotResponse {
+  string serialized = 1;
+}

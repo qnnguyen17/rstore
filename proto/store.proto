@@ -1,6 +1,7 @@
 syntax = "proto3";
 package store;
 
+// TODO: split this into a read service and a write service
 service StoreService {
   rpc Set (SetRequest) returns (SetResponse);
   rpc Get (GetRequest) returns (GetResponse);
