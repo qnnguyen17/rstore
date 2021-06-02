@@ -6,6 +6,7 @@ pub struct Store {
     store: HashMap<String, String>,
 }
 
+// TODO: store timestamps in entries to handle out-of-order writes
 impl Store {
     pub fn get(&self, key: &str) -> Option<&String> {
         self.store.get(key)

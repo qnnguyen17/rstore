@@ -1,9 +1,11 @@
+use std::collections::HashSet;
+use std::convert::TryInto;
 use std::sync::{Arc, RwLock};
 
 use tonic::{Request, Response, Status};
 
 use crate::proto::replication::leader_service_server::LeaderService;
-use crate::proto::replication::{GetLatestSnapshotRequest, GetLatestSnapshotResponse};
+use crate::proto::replication::{RegisterFollowerRequest, RegisterFollowerResponse};
 use crate::proto::store::get_response::Value;
 use crate::proto::store::store_service_server::StoreService;
 use crate::proto::store::{
@@ -11,9 +13,14 @@ use crate::proto::store::{
 };
 use crate::store::Store;
 
+use follower_client::FollowerClient;
+
+mod follower_client;
+
 #[derive(Clone, Debug, Default)]
 pub struct Leader {
     store: Arc<RwLock<Store>>,
+    followers: Arc<RwLock<HashSet<FollowerClient>>>,
     // TODO: add a writeahead log
 }
 
@@ -42,7 +49,23 @@ impl StoreService for Leader {
         self.store
             .write()
             .expect("failed to acquire write lock on data store")
-            .set(key, value);
+            .set(key.clone(), value.clone());
+
+        let followers = (*self
+            .followers
+            .read()
+            .expect("failed to acquire read lock on follower clients"))
+        .clone();
+
+        for f in followers {
+            println!("Follower: {:#?}", f);
+            let key = key.clone();
+            let value = value.clone();
+            tokio::spawn(async move {
+                // TODO: error handling
+                f.replicate_set(key, value).await.unwrap();
+            });
+        }
 
         Ok(Response::new(SetResponse {}))
     }
@@ -65,10 +88,25 @@ impl StoreService for Leader {
 
 #[tonic::async_trait]
 impl LeaderService for Leader {
-    async fn get_latest_snapshot(
+    async fn register_follower(
         &self,
-        _request: Request<GetLatestSnapshotRequest>,
-    ) -> Result<Response<GetLatestSnapshotResponse>, Status> {
+        request: Request<RegisterFollowerRequest>,
+    ) -> Result<Response<RegisterFollowerResponse>, Status> {
+        let mut follower_address = request.remote_addr().unwrap(); // TODO: error type
+
+        // TODO: convert this to an error
+        let follower_port = request.into_inner().host_port.try_into().unwrap();
+        follower_address.set_port(follower_port);
+
+        println!("Follower address: {:#?}", follower_address);
+
+        self.followers
+            .write()
+            .expect("failed to acquire write lock on follower clients")
+            .insert(FollowerClient {
+                address: follower_address,
+            });
+
         let lock_guard = self
             .store
             .read()
@@ -79,8 +117,8 @@ impl LeaderService for Leader {
 
         drop(lock_guard);
 
-        Ok(Response::new(GetLatestSnapshotResponse {
-            serialized: snapshot,
+        Ok(Response::new(RegisterFollowerResponse {
+            serialized_snapshot: snapshot,
         }))
     }
 }

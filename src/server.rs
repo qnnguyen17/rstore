@@ -1,9 +1,12 @@
+use std::net::SocketAddr;
+
 use tonic::transport::Server;
 
 use crate::follower::Follower;
 use crate::leader::Leader;
 
 use proto::replication::leader_service_server::LeaderServiceServer;
+use proto::replication::replica_service_server::ReplicaServiceServer;
 use proto::store::store_service_server::StoreServiceServer;
 
 use structopt::StructOpt;
@@ -41,15 +44,16 @@ struct ServerOpt {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let opt = ServerOpt::from_args();
 
-    let addr = opt.address.parse()?;
+    let addr: SocketAddr = opt.address.parse()?;
+    let port = addr.port();
 
     match opt.command {
         Command::Follower(opt) => {
             let leader_address = opt.leader_address.parse()?;
-            let follower = Follower::initialize(leader_address).await?;
+            let follower = Follower::initialize(leader_address, port as u32).await?;
             Server::builder()
-                .add_service(StoreServiceServer::new(follower))
-                // TODO: add replica service
+                .add_service(StoreServiceServer::new(follower.clone()))
+                .add_service(ReplicaServiceServer::new(follower))
                 .serve(addr)
                 .await?;
         }

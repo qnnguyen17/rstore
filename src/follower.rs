@@ -8,7 +8,7 @@ use thiserror::Error;
 
 use crate::proto::replication::leader_service_client::LeaderServiceClient;
 use crate::proto::replication::replica_service_server::ReplicaService;
-use crate::proto::replication::{GetLatestSnapshotRequest, SetReplicaRequest, SetReplicaResponse};
+use crate::proto::replication::{RegisterFollowerRequest, SetReplicaRequest, SetReplicaResponse};
 use crate::proto::store::get_response::Value;
 use crate::proto::store::store_service_server::StoreService;
 use crate::proto::store::{
@@ -28,20 +28,20 @@ pub enum FollowerError {
     RpcCall(#[from] Status),
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Follower {
     store: Arc<RwLock<Store>>,
 }
 
 impl Follower {
-    pub async fn initialize(leader_endpoint: Endpoint) -> Result<Self, FollowerError> {
+    pub async fn initialize(leader_endpoint: Endpoint, port: u32) -> Result<Self, FollowerError> {
         let mut client = LeaderServiceClient::connect(leader_endpoint).await?;
 
         let snapshot_response = client
-            .get_latest_snapshot(Request::new(GetLatestSnapshotRequest {}))
+            .register_follower(Request::new(RegisterFollowerRequest { host_port: port }))
             .await?;
 
-        let serialized_snapshot = snapshot_response.into_inner().serialized;
+        let serialized_snapshot = snapshot_response.into_inner().serialized_snapshot;
 
         let snapshot = serde_json::from_str(&serialized_snapshot)?;
 
@@ -55,9 +55,16 @@ impl Follower {
 impl ReplicaService for Follower {
     async fn set_replica(
         &self,
-        _request: Request<SetReplicaRequest>,
+        request: Request<SetReplicaRequest>,
     ) -> Result<Response<SetReplicaResponse>, Status> {
-        todo!()
+        let SetReplicaRequest { key, value } = request.into_inner();
+
+        self.store
+            .write()
+            .expect("failed to acquire write lock on data store")
+            .set(key, value);
+
+        Ok(Response::new(SetReplicaResponse {}))
     }
 }
 
