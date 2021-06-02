@@ -1,10 +1,9 @@
 use std::sync::{Arc, RwLock};
 
+use thiserror::Error;
 use tonic::transport;
 use tonic::transport::Endpoint;
 use tonic::{Request, Response, Status};
-
-use thiserror::Error;
 
 use crate::proto::replication::leader_service_client::LeaderServiceClient;
 use crate::proto::replication::replica_service_server::ReplicaService;

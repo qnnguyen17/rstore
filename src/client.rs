@@ -1,5 +1,5 @@
-use proto::store::store_service_client::StoreServiceClient;
-use proto::store::{DeleteRequest, GetRequest, SetRequest};
+use self::proto::store::store_service_client::StoreServiceClient;
+use self::proto::store::{DeleteRequest, GetRequest, SetRequest};
 
 pub mod proto;
 

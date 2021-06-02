@@ -4,6 +4,7 @@ use std::sync::{Arc, RwLock};
 
 use tonic::{Request, Response, Status};
 
+use self::follower_client::FollowerClient;
 use crate::proto::replication::leader_service_server::LeaderService;
 use crate::proto::replication::{RegisterFollowerRequest, RegisterFollowerResponse};
 use crate::proto::store::get_response::Value;
@@ -12,8 +13,6 @@ use crate::proto::store::{
     DeleteRequest, DeleteResponse, GetRequest, GetResponse, SetRequest, SetResponse,
 };
 use crate::store::Store;
-
-use follower_client::FollowerClient;
 
 mod follower_client;
 
@@ -58,7 +57,6 @@ impl StoreService for Leader {
         .clone();
 
         for f in followers {
-            println!("Follower: {:#?}", f);
             let key = key.clone();
             let value = value.clone();
             tokio::spawn(async move {
@@ -92,13 +90,16 @@ impl LeaderService for Leader {
         &self,
         request: Request<RegisterFollowerRequest>,
     ) -> Result<Response<RegisterFollowerResponse>, Status> {
-        let mut follower_address = request.remote_addr().unwrap(); // TODO: error type
+        let mut follower_address = request
+            .remote_addr()
+            .ok_or_else(|| Status::invalid_argument("no remote address in request"))?;
 
-        // TODO: convert this to an error
-        let follower_port = request.into_inner().host_port.try_into().unwrap();
+        let follower_port =
+            request.into_inner().host_port.try_into().map_err(|err| {
+                Status::invalid_argument(format!("invalid host port: {:#?}", err))
+            })?;
+
         follower_address.set_port(follower_port);
-
-        println!("Follower address: {:#?}", follower_address);
 
         self.followers
             .write()
@@ -114,8 +115,6 @@ impl LeaderService for Leader {
 
         let snapshot = serde_json::to_string(&(*lock_guard))
             .map_err(|err| Status::internal(err.to_string()))?;
-
-        drop(lock_guard);
 
         Ok(Response::new(RegisterFollowerResponse {
             serialized_snapshot: snapshot,

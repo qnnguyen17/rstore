@@ -1,15 +1,13 @@
 use std::net::SocketAddr;
 
+use structopt::StructOpt;
 use tonic::transport::Server;
 
+use self::proto::replication::leader_service_server::LeaderServiceServer;
+use self::proto::replication::replica_service_server::ReplicaServiceServer;
+use self::proto::store::store_service_server::StoreServiceServer;
 use crate::follower::Follower;
 use crate::leader::Leader;
-
-use proto::replication::leader_service_server::LeaderServiceServer;
-use proto::replication::replica_service_server::ReplicaServiceServer;
-use proto::store::store_service_server::StoreServiceServer;
-
-use structopt::StructOpt;
 
 mod follower;
 mod leader;

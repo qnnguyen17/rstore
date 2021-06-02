@@ -1,13 +1,10 @@
 use std::net::SocketAddr;
 
+use thiserror::Error;
+use tonic::{transport, Request, Status};
+
 use crate::proto::replication::replica_service_client::ReplicaServiceClient;
 use crate::proto::replication::SetReplicaRequest;
-
-use thiserror::Error;
-
-use tonic::transport::{self, Endpoint};
-use tonic::Request;
-use tonic::Status;
 
 #[derive(Debug, Error)]
 pub(super) enum FollowerClientError {
@@ -35,8 +32,7 @@ impl FollowerClient {
         let mut client = ReplicaServiceClient::connect(endpoint).await?;
         let set_request = SetReplicaRequest { key, value };
 
-        let response = client.set_replica(Request::new(set_request)).await?;
-        println!("Response: {:#?}", response);
+        client.set_replica(Request::new(set_request)).await?;
 
         Ok(())
     }
