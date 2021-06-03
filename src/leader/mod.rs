@@ -1,7 +1,9 @@
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::convert::TryInto;
+use std::net::SocketAddr;
 use std::sync::{Arc, RwLock};
 
+use tokio::runtime::Runtime;
 use tonic::{Request, Response, Status};
 
 use self::follower_client::FollowerClient;
@@ -16,11 +18,26 @@ use crate::store::Store;
 
 mod follower_client;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct Leader {
     store: Arc<RwLock<Store>>,
-    followers: Arc<RwLock<HashSet<FollowerClient>>>,
-    // TODO: add a writeahead log
+    followers: Arc<RwLock<HashMap<SocketAddr, FollowerClient>>>,
+    runtime: Arc<Runtime>,
+}
+
+impl Leader {
+    pub fn new() -> Self {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .expect("failed to initialize tokio runtime");
+
+        Self {
+            store: Default::default(),
+            followers: Default::default(),
+            runtime: Arc::new(runtime),
+        }
+    }
 }
 
 #[tonic::async_trait]
@@ -56,12 +73,11 @@ impl StoreService for Leader {
             .expect("failed to acquire read lock on follower clients"))
         .clone();
 
-        for f in followers {
+        for (_, f) in followers {
             let key = key.clone();
             let value = value.clone();
             tokio::spawn(async move {
-                // TODO: error handling
-                f.replicate_set(key, value).await.unwrap();
+                f.replicate_set(key, value).await;
             });
         }
 
@@ -101,12 +117,16 @@ impl LeaderService for Leader {
 
         follower_address.set_port(follower_port);
 
+        // This operation will drop any previous oustanding requests (i.e. if the follower
+        // died and is reinitializing). This is okay, because the snapshot is generated
+        // _after_ the follower has been registered, so we don't lose any data.
         self.followers
             .write()
             .expect("failed to acquire write lock on follower clients")
-            .insert(FollowerClient {
-                address: follower_address,
-            });
+            .insert(
+                follower_address,
+                FollowerClient::new(follower_address, self.runtime.clone()),
+            );
 
         let lock_guard = self
             .store

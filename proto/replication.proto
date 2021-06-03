@@ -9,9 +9,13 @@ service ReplicaService {
 }
 
 message SetReplicaRequest {
-  string key = 1;
-  string value = 2;
-  // google.protobuf.Timestamp timestamp = 3;
+  message Record {
+    string key = 1;
+    string value = 2;
+    // google.protobuf.Timestamp timestamp = 3;
+  }
+
+  repeated Record records = 1;
 }
 
 message SetReplicaResponse {}

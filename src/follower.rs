@@ -56,12 +56,16 @@ impl ReplicaService for Follower {
         &self,
         request: Request<SetReplicaRequest>,
     ) -> Result<Response<SetReplicaResponse>, Status> {
-        let SetReplicaRequest { key, value } = request.into_inner();
+        let SetReplicaRequest { records } = request.into_inner();
 
-        self.store
+        let mut store = self
+            .store
             .write()
-            .expect("failed to acquire write lock on data store")
-            .set(key, value);
+            .expect("failed to acquire write lock on data store");
+
+        for r in records {
+            store.set(r.key, r.value);
+        }
 
         Ok(Response::new(SetReplicaResponse {}))
     }

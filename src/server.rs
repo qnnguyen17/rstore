@@ -56,7 +56,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .await?;
         }
         Command::Leader(_) => {
-            let leader = Leader::default();
+            let leader = Leader::new();
             Server::builder()
                 .add_service(StoreServiceServer::new(leader.clone()))
                 .add_service(LeaderServiceServer::new(leader))
