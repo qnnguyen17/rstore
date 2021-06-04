@@ -64,7 +64,7 @@ impl ReplicaService for Follower {
             .expect("failed to acquire write lock on data store");
 
         for r in records {
-            store.set(r.key, r.value);
+            store.set(r.key, r.value, r.millis_since_leader_init);
         }
 
         Ok(Response::new(SetReplicaResponse {}))
@@ -85,8 +85,7 @@ impl StoreService for Follower {
             .read()
             .expect("failed to acquire read lock")
             .get(&key)
-            .cloned()
-            .map(Value::StringValue);
+            .map(|entry| Value::StringValue(entry.value.clone()));
 
         Ok(Response::new(GetResponse { value }))
     }

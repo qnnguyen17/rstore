@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::convert::TryInto;
 use std::net::SocketAddr;
 use std::sync::{Arc, RwLock};
+use std::time::Instant;
 
 use tokio::runtime::Runtime;
 use tonic::{Request, Response, Status};
@@ -23,6 +24,7 @@ pub struct Leader {
     store: Arc<RwLock<Store>>,
     followers: Arc<RwLock<HashMap<SocketAddr, FollowerClient>>>,
     runtime: Arc<Runtime>,
+    init_instant: Instant,
 }
 
 impl Leader {
@@ -36,6 +38,7 @@ impl Leader {
             store: Default::default(),
             followers: Default::default(),
             runtime: Arc::new(runtime),
+            init_instant: Instant::now(),
         }
     }
 }
@@ -51,8 +54,7 @@ impl StoreService for Leader {
             .read()
             .expect("failed to acquire read lock on data store")
             .get(&key)
-            .cloned()
-            .map(Value::StringValue);
+            .map(|entry| Value::StringValue(entry.value.clone()));
 
         Ok(Response::new(GetResponse { value }))
     }
@@ -61,11 +63,19 @@ impl StoreService for Leader {
         let request = request.into_inner();
         let key = request.key;
         let value = request.value;
+        let millis_since_leader_init =
+            self.init_instant
+                .elapsed()
+                .as_millis()
+                .try_into()
+                .map_err(|err| {
+                    Status::internal(format!("failed converting leader elapsed time {:#?}", err))
+                })?;
 
         self.store
             .write()
             .expect("failed to acquire write lock on data store")
-            .set(key.clone(), value.clone());
+            .set(key.clone(), value.clone(), millis_since_leader_init);
 
         let followers = (*self
             .followers
@@ -77,7 +87,7 @@ impl StoreService for Leader {
             let key = key.clone();
             let value = value.clone();
             tokio::spawn(async move {
-                f.replicate_set(key, value).await;
+                f.replicate_set(key, value, millis_since_leader_init).await;
             });
         }
 

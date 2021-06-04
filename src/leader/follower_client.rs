@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::mpsc;
 use std::sync::mpsc::SyncSender;
@@ -16,6 +15,7 @@ use tonic::{transport, Request, Status};
 use crate::proto::replication::replica_service_client::ReplicaServiceClient;
 use crate::proto::replication::set_replica_request;
 use crate::proto::replication::SetReplicaRequest;
+use crate::store::Store;
 
 #[derive(Debug, Error)]
 pub(super) enum FollowerClientError {
@@ -29,15 +29,15 @@ pub(super) enum FollowerClientError {
 #[derive(Clone, Debug)]
 pub(super) struct FollowerClient {
     pub(super) address: SocketAddr,
-    outstanding_requests: Arc<RwLock<HashMap<String, String>>>,
+    pending_updates: Arc<RwLock<Store>>,
     retry_thread: Arc<JoinHandle<()>>,
     retry_sender: Arc<SyncSender<()>>,
 }
 
 impl FollowerClient {
     pub(super) fn new(address: SocketAddr, runtime: Arc<Runtime>) -> Self {
-        let outstanding_requests = Arc::new(RwLock::new(HashMap::<String, String>::new()));
-        let requests = outstanding_requests.clone();
+        let pending_updates = Arc::new(RwLock::new(Store::default()));
+        let pending_updates_ = pending_updates.clone();
 
         // We only need a channel buffer with space for one message, because the retry
         // thread attempts to re-send all pending requests on a loop until successful.
@@ -48,40 +48,49 @@ impl FollowerClient {
         let retry_thread = thread::spawn(move || {
             receiver.into_iter().for_each(|()| {
                 loop {
-                    let requests_read = requests
+                    let pending_updates_read = pending_updates_
                         .read()
-                        .expect("failed to acquire read lock on outstanding requests map");
+                        .expect("failed to acquire read lock on pending updates map");
 
-                    if requests_read.is_empty() {
+                    if pending_updates_read.is_empty() {
                         break;
                     }
 
-                    println!("outstanding reqs: {:#?}", requests_read);
+                    println!("pending updates: {:#?}", pending_updates_read);
                     let endpoint = format!("https://{}", address.to_string());
-                    let records: Vec<_> = requests_read
+                    let pending_updates_to_send: Vec<_> = pending_updates_read
                         .iter()
-                        .map(|(key, value)| set_replica_request::Record {
+                        .map(|(key, entry)| set_replica_request::Record {
                             key: key.to_owned(),
-                            value: value.to_owned(),
+                            value: entry.value.clone(),
+                            millis_since_leader_init: entry.millis_since_leader_init,
                         })
                         .collect();
 
-                    drop(requests_read);
+                    drop(pending_updates_read);
 
-                    match runtime.block_on(Self::attempt_replica_set(endpoint, records.clone())) {
+                    match runtime.block_on(Self::attempt_replica_set(
+                        endpoint,
+                        pending_updates_to_send.clone(),
+                    )) {
                         Ok(()) => {
-                            println!("Successfully sent outstanding replication requests.");
-                            let mut requests_write = requests
+                            println!("Successfully sent pending replication requests.");
+                            let mut stored_pending_updates = pending_updates_
                                 .write()
-                                .expect("failed to acquire write lock on outstanding requests map");
-                            for rec in records {
-                                // TODO: need timestamps to correctly handle records that were updated
-                                // while request was in flight
-                                if requests_write.contains_key(&rec.key) {
-                                    // TODO: only perform this if the sent record timestamp is >= the stored record timestamp
-                                    // If a newer outstanding request was stored while the previous one was in flight, we
-                                    // shouldn't delete it
-                                    requests_write.remove(&rec.key);
+                                .expect("failed to acquire write lock on pending updates map");
+                            for sent_update in pending_updates_to_send {
+                                // Only delete the stored pending update if the stored record timestamp is <= the sent timestamp
+                                // If a newer pending update was stored while the previous one was in flight, we shouldn't delete it
+                                let stored_update_is_newer = stored_pending_updates
+                                    .get(&sent_update.key)
+                                    .map(|stored_entry| {
+                                        stored_entry.millis_since_leader_init
+                                            > sent_update.millis_since_leader_init
+                                    })
+                                    .unwrap_or_default();
+
+                                if !stored_update_is_newer {
+                                    stored_pending_updates.remove(&sent_update.key);
                                 }
                             }
                         }
@@ -97,13 +106,18 @@ impl FollowerClient {
 
         Self {
             address,
-            outstanding_requests,
+            pending_updates,
             retry_thread: Arc::new(retry_thread),
             retry_sender: Arc::new(sender),
         }
     }
 
-    pub(super) async fn replicate_set(&self, key: String, value: String) {
+    pub(super) async fn replicate_set(
+        &self,
+        key: String,
+        value: String,
+        millis_since_leader_init: u64,
+    ) {
         let endpoint = format!("https://{}", self.address.to_string());
 
         let set_result = Self::attempt_replica_set(
@@ -111,6 +125,7 @@ impl FollowerClient {
             vec![set_replica_request::Record {
                 key: key.clone(),
                 value: value.clone(),
+                millis_since_leader_init,
             }],
         )
         .await;
@@ -119,11 +134,12 @@ impl FollowerClient {
             Ok(()) => {}
             Err(err) => {
                 println!("replica SET operation failed with error: {:#?}", err);
-                let mut outstanding = self
-                    .outstanding_requests
+                let mut pending_updates = self
+                    .pending_updates
                     .write()
-                    .expect("failed to acquire write lock on outstanding requests map");
-                outstanding.insert(key, value);
+                    .expect("failed to acquire write lock on pending updates map");
+
+                pending_updates.set(key, value, millis_since_leader_init);
 
                 match self.retry_sender.try_send(()) {
                     Ok(()) => {
