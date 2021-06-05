@@ -5,9 +5,10 @@ use tonic::transport;
 use tonic::transport::Endpoint;
 use tonic::{Request, Response, Status};
 
+use crate::proto::replication::replicate_request::operation;
 use crate::proto::replication::leader_service_client::LeaderServiceClient;
 use crate::proto::replication::replica_service_server::ReplicaService;
-use crate::proto::replication::{RegisterFollowerRequest, SetReplicaRequest, SetReplicaResponse};
+use crate::proto::replication::{RegisterFollowerRequest, ReplicateRequest, ReplicateResponse};
 use crate::proto::store::get_response::Value;
 use crate::proto::store::store_service_server::StoreService;
 use crate::proto::store::{
@@ -52,22 +53,29 @@ impl Follower {
 
 #[tonic::async_trait]
 impl ReplicaService for Follower {
-    async fn set_replica(
+    async fn replicate(
         &self,
-        request: Request<SetReplicaRequest>,
-    ) -> Result<Response<SetReplicaResponse>, Status> {
-        let SetReplicaRequest { records } = request.into_inner();
+        request: Request<ReplicateRequest>,
+    ) -> Result<Response<ReplicateResponse>, Status> {
+        let ReplicateRequest { operations } = request.into_inner();
 
         let mut store = self
             .store
             .write()
             .expect("failed to acquire write lock on data store");
 
-        for r in records {
-            store.set(r.key, r.value, r.millis_since_leader_init);
+        for o in operations {
+            match o.value {
+                Some(operation::Value::StringValue(value)) => {
+                    store.set(o.key, value, o.millis_since_leader_init);
+                }
+                None => {
+                    todo!("perform deletion");
+                }
+            }
         }
 
-        Ok(Response::new(SetReplicaResponse {}))
+        Ok(Response::new(ReplicateResponse {}))
     }
 }
 

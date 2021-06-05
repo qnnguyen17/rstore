@@ -2,21 +2,23 @@ syntax = "proto3";
 package replication;
 
 service ReplicaService {
-  rpc SetReplica (SetReplicaRequest) returns (SetReplicaResponse);
+  rpc Replicate (ReplicateRequest) returns (ReplicateResponse);
   // rpc DeleteReplica (DeleteReplicaRequest) returns (DeleteReplicaResponse);
 }
 
-message SetReplicaRequest {
-  message Record {
+message ReplicateRequest {
+  message Operation {
     string key = 1;
-    string value = 2;
+    oneof value {
+      string string_value = 2;
+    }
     uint64 millis_since_leader_init = 3;
   }
 
-  repeated Record records = 1;
+  repeated Operation operations = 1;
 }
 
-message SetReplicaResponse {}
+message ReplicateResponse {}
 
 service LeaderService {
   rpc RegisterFollower (RegisterFollowerRequest) returns (RegisterFollowerResponse);

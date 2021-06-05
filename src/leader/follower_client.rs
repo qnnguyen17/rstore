@@ -13,8 +13,9 @@ use tokio::runtime::Runtime;
 use tonic::{transport, Request, Status};
 
 use crate::proto::replication::replica_service_client::ReplicaServiceClient;
-use crate::proto::replication::set_replica_request;
-use crate::proto::replication::SetReplicaRequest;
+use crate::proto::replication::replicate_request;
+use crate::proto::replication::replicate_request::operation::Value;
+use crate::proto::replication::ReplicateRequest;
 use crate::store::Store;
 
 #[derive(Debug, Error)]
@@ -60,16 +61,16 @@ impl FollowerClient {
                     let endpoint = format!("https://{}", address.to_string());
                     let pending_updates_to_send: Vec<_> = pending_updates_read
                         .iter()
-                        .map(|(key, entry)| set_replica_request::Record {
+                        .map(|(key, entry)| replicate_request::Operation {
                             key: key.to_owned(),
-                            value: entry.value.clone(),
+                            value: Some(Value::StringValue(entry.value.clone())),
                             millis_since_leader_init: entry.millis_since_leader_init,
                         })
                         .collect();
 
                     drop(pending_updates_read);
 
-                    match runtime.block_on(Self::attempt_replica_set(
+                    match runtime.block_on(Self::attempt_replicate(
                         endpoint,
                         pending_updates_to_send.clone(),
                     )) {
@@ -112,7 +113,7 @@ impl FollowerClient {
         }
     }
 
-    pub(super) async fn replicate_set(
+    pub(super) async fn replicate(
         &self,
         key: String,
         value: String,
@@ -120,17 +121,20 @@ impl FollowerClient {
     ) {
         let endpoint = format!("https://{}", self.address.to_string());
 
-        let set_result = Self::attempt_replica_set(
+        // TODO: append request to pending list
+        // TODO: signal the replication thread
+
+        let replicate_result = Self::attempt_replicate(
             endpoint,
-            vec![set_replica_request::Record {
+            vec![replicate_request::Operation {
                 key: key.clone(),
-                value: value.clone(),
+                value: Some(Value::StringValue(value.clone())),
                 millis_since_leader_init,
             }],
         )
         .await;
 
-        match set_result {
+        match replicate_result {
             Ok(()) => {}
             Err(err) => {
                 println!("replica SET operation failed with error: {:#?}", err);
@@ -154,14 +158,14 @@ impl FollowerClient {
         }
     }
 
-    async fn attempt_replica_set(
+    async fn attempt_replicate(
         endpoint: String,
-        records: Vec<set_replica_request::Record>,
+        operations: Vec<replicate_request::Operation>,
     ) -> Result<(), FollowerClientError> {
         let mut client = ReplicaServiceClient::connect(endpoint).await?;
-        let set_request = SetReplicaRequest { records };
+        let set_request = ReplicateRequest { operations };
 
-        client.set_replica(Request::new(set_request)).await?;
+        client.replicate(Request::new(set_request)).await?;
 
         Ok(())
     }

@@ -18,6 +18,7 @@ use crate::proto::store::{
 use crate::store::Store;
 
 mod follower_client;
+mod pending_updates;
 
 #[derive(Clone, Debug)]
 pub struct Leader {
@@ -87,7 +88,7 @@ impl StoreService for Leader {
             let key = key.clone();
             let value = value.clone();
             tokio::spawn(async move {
-                f.replicate_set(key, value, millis_since_leader_init).await;
+                f.replicate(key, value, millis_since_leader_init).await;
             });
         }
 
