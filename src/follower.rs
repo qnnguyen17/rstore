@@ -5,9 +5,9 @@ use tonic::transport;
 use tonic::transport::Endpoint;
 use tonic::{Request, Response, Status};
 
-use crate::proto::replication::replicate_request::operation;
 use crate::proto::replication::leader_service_client::LeaderServiceClient;
 use crate::proto::replication::replica_service_server::ReplicaService;
+use crate::proto::replication::replicate_request::operation;
 use crate::proto::replication::{RegisterFollowerRequest, ReplicateRequest, ReplicateResponse};
 use crate::proto::store::get_response::Value;
 use crate::proto::store::store_service_server::StoreService;

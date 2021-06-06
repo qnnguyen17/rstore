@@ -1,4 +1,4 @@
-use std::collections::{hash_map::Iter, HashMap};
+use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
@@ -37,20 +37,7 @@ impl Store {
             });
     }
 
-    // TODO: probably have to do some tombstone to handle "pending-set after delete"
     pub fn delete(&mut self, key: &str) -> Option<StoreEntry> {
         self.inner.remove(key)
-    }
-
-    pub fn remove(&mut self, key: &str) {
-        self.inner.remove(key);
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.inner.is_empty()
-    }
-
-    pub fn iter(&self) -> Iter<String, StoreEntry> {
-        self.inner.iter()
     }
 }
