@@ -93,19 +93,19 @@ impl FollowerClient {
         }
     }
 
-    pub(super) async fn replicate(&self, key: String, value: String, sequence_number: u64) {
+    pub(super) async fn replicate(&self, key: String, value: Option<String>, sequence_number: u64) {
         self.pending_updates
             .write()
             .expect("failed to acquire write lock on pending updates list")
             .push(replicate_request::Operation {
                 key,
-                value: Some(Value::StringValue(value)),
+                value: value.map(Value::StringValue),
                 sequence_number,
             });
 
         match self.update_sender.try_send(()) {
             Ok(()) => {
-                println!("Successfully sent message to retry channel");
+                println!("Successfully sent message to update thread");
             }
             Err(TrySendError::Disconnected(_)) => panic!(),
             // Full send buffer means the retry thread is guaranteed to see all the outstanding

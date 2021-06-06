@@ -69,21 +69,22 @@ impl ReplicaService for Follower {
             .expect("failed to acquire write lock on data store");
 
         for o in operations {
+            let key = o.key;
+            let sequence_number = o.sequence_number;
             match o.value {
                 Some(operation::Value::StringValue(value)) => {
-                    let sequence_number = o.sequence_number;
-                    store.set(o.key, value, sequence_number);
-                    // Update fn always returns Some(..) so the result here will always be Ok(..)
-                    let _ = self.next_sequence_number.fetch_update(
-                        Ordering::SeqCst,
-                        Ordering::SeqCst,
-                        |old| Some(max(old, sequence_number + 1)),
-                    );
+                    store.set(key, value, sequence_number);
                 }
                 None => {
-                    todo!("perform deletion");
+                    store.delete(&key);
                 }
             }
+            // Update fn always returns Some(..) so the result here will always be Ok(..)
+            let _ =
+                self.next_sequence_number
+                    .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |old| {
+                        Some(max(old, sequence_number + 1))
+                    });
         }
 
         Ok(Response::new(ReplicateResponse {}))

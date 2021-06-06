@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::convert::TryInto;
 use std::net::SocketAddr;
 use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, RwLock};
 
 use tokio::runtime::Runtime;
@@ -65,26 +66,24 @@ impl StoreService for Leader {
         let key = request.key;
         let value = request.value;
 
-        let sequence_number = self
-            .next_sequence_number
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let sequence_number = self.next_sequence_number.fetch_add(1, Ordering::SeqCst);
 
         self.store
             .write()
             .expect("failed to acquire write lock on data store")
             .set(key.clone(), value.clone(), sequence_number);
 
-        let followers = (*self
+        let followers = self
             .followers
             .read()
-            .expect("failed to acquire read lock on follower clients"))
-        .clone();
+            .expect("failed to acquire read lock on follower clients");
 
-        for (_, f) in followers {
+        for (_, f) in followers.iter() {
             let key = key.clone();
             let value = value.clone();
+            let f = f.clone();
             tokio::spawn(async move {
-                f.replicate(key, value, sequence_number).await;
+                f.replicate(key, Some(value), sequence_number).await;
             });
         }
 
@@ -98,10 +97,25 @@ impl StoreService for Leader {
         let request = request.into_inner();
         let key = request.key;
 
+        let sequence_number = self.next_sequence_number.fetch_add(1, Ordering::SeqCst);
+
         self.store
             .write()
             .expect("failed to acquire write lock on data store")
             .delete(&key);
+
+        let followers = self
+            .followers
+            .read()
+            .expect("failed to acquire read lock on follower clients");
+
+        for (_, f) in followers.iter() {
+            let key = key.clone();
+            let f = f.clone();
+            tokio::spawn(async move {
+                f.replicate(key, None, sequence_number).await;
+            });
+        }
 
         Ok(Response::new(DeleteResponse {}))
     }

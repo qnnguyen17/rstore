@@ -3,7 +3,6 @@ package replication;
 
 service ReplicaService {
   rpc Replicate (ReplicateRequest) returns (ReplicateResponse);
-  // rpc DeleteReplica (DeleteReplicaRequest) returns (DeleteReplicaResponse);
 }
 
 message ReplicateRequest {
