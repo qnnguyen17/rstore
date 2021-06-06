@@ -12,7 +12,7 @@ message ReplicateRequest {
     oneof value {
       string string_value = 2;
     }
-    uint64 millis_since_leader_init = 3;
+    uint64 sequence_number = 3;
   }
 
   repeated Operation operations = 1;

@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Default, Deserialize, Debug, Serialize)]
 pub struct StoreEntry {
     pub value: String,
-    pub millis_since_leader_init: u64,
+    pub sequence_number: u64,
 }
 
 #[derive(Default, Deserialize, Debug, Serialize)]
@@ -18,22 +18,22 @@ impl Store {
         self.inner.get(key)
     }
 
-    pub fn set(&mut self, key: String, value: String, millis_since_leader_init: u64) {
+    pub fn set(&mut self, key: String, value: String, sequence_number: u64) {
         self.inner
             .entry(key)
             // If the key exists, keep the entry with the greater timestamp
             .and_modify(|entry| {
-                if entry.millis_since_leader_init < millis_since_leader_init {
+                if entry.sequence_number < sequence_number {
                     *entry = StoreEntry {
                         value: value.clone(),
-                        millis_since_leader_init,
+                        sequence_number,
                     };
                 }
             })
             // If the key doesn't exist, add a new entry
             .or_insert_with(|| StoreEntry {
                 value,
-                millis_since_leader_init,
+                sequence_number,
             });
     }
 

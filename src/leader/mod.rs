@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 use std::convert::TryInto;
 use std::net::SocketAddr;
+use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, RwLock};
-use std::time::Instant;
 
 use tokio::runtime::Runtime;
 use tonic::{Request, Response, Status};
@@ -25,7 +25,7 @@ pub struct Leader {
     store: Arc<RwLock<Store>>,
     followers: Arc<RwLock<HashMap<SocketAddr, FollowerClient>>>,
     runtime: Arc<Runtime>,
-    init_instant: Instant,
+    next_sequence_number: Arc<AtomicU64>,
 }
 
 impl Leader {
@@ -39,7 +39,7 @@ impl Leader {
             store: Default::default(),
             followers: Default::default(),
             runtime: Arc::new(runtime),
-            init_instant: Instant::now(),
+            next_sequence_number: Arc::new(AtomicU64::new(1)),
         }
     }
 }
@@ -64,19 +64,15 @@ impl StoreService for Leader {
         let request = request.into_inner();
         let key = request.key;
         let value = request.value;
-        let millis_since_leader_init =
-            self.init_instant
-                .elapsed()
-                .as_millis()
-                .try_into()
-                .map_err(|err| {
-                    Status::internal(format!("failed converting leader elapsed time {:#?}", err))
-                })?;
+
+        let sequence_number = self
+            .next_sequence_number
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
 
         self.store
             .write()
             .expect("failed to acquire write lock on data store")
-            .set(key.clone(), value.clone(), millis_since_leader_init);
+            .set(key.clone(), value.clone(), sequence_number);
 
         let followers = (*self
             .followers
@@ -88,7 +84,7 @@ impl StoreService for Leader {
             let key = key.clone();
             let value = value.clone();
             tokio::spawn(async move {
-                f.replicate(key, value, millis_since_leader_init).await;
+                f.replicate(key, value, sequence_number).await;
             });
         }
 

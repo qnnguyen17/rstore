@@ -1,3 +1,5 @@
+use std::cmp::max;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 
 use thiserror::Error;
@@ -31,6 +33,7 @@ pub enum FollowerError {
 #[derive(Clone, Debug)]
 pub struct Follower {
     store: Arc<RwLock<Store>>,
+    next_sequence_number: Arc<AtomicU64>,
 }
 
 impl Follower {
@@ -47,6 +50,7 @@ impl Follower {
 
         Ok(Follower {
             store: Arc::new(RwLock::new(snapshot)),
+            next_sequence_number: Arc::new(AtomicU64::new(1)),
         })
     }
 }
@@ -67,7 +71,14 @@ impl ReplicaService for Follower {
         for o in operations {
             match o.value {
                 Some(operation::Value::StringValue(value)) => {
-                    store.set(o.key, value, o.millis_since_leader_init);
+                    let sequence_number = o.sequence_number;
+                    store.set(o.key, value, sequence_number);
+                    // Update fn always returns Some(..) so the result here will always be Ok(..)
+                    let _ = self.next_sequence_number.fetch_update(
+                        Ordering::SeqCst,
+                        Ordering::SeqCst,
+                        |old| Some(max(old, sequence_number + 1)),
+                    );
                 }
                 None => {
                     todo!("perform deletion");
